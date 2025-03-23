@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF Explosion</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        #debug {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 170px;
+            color: white;
+            background: #00000050;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+            border-radius: 4px;
+            border: 2px solid #00ff15;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="canvas">
+        <div
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 5px; height: 5px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;">
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js",
+                "rapier": "./rapier.es.js",
+                "three/EffectComposer": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/EffectComposer.js",
+                "three/RenderPass": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/RenderPass.js",
+                "three/ShaderPass": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/ShaderPass.js",
+                "three/FXAAShader": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/shaders/FXAAShader.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/EffectComposer';
+        import { RenderPass } from 'three/RenderPass';
+        import { ShaderPass } from 'three/ShaderPass';
+        import { FXAAShader } from 'three/FXAAShader';
+        import { initPhysics, updatePhysics, world, characterBody } from './physics.js';
+        import * as RAPIER from 'rapier';
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        const clock = new THREE.Clock();
+
+        const composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+
+        const fxaaPass = new ShaderPass(FXAAShader);
+        fxaaPass.uniforms['resolution'].value.set(1 / window.innerWidth, 1 / window.innerHeight);
+        fxaaPass.renderToScreen = true;
+
+        composer.addPass(renderPass);
+        composer.addPass(fxaaPass);
+
+        const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+        const skyMaterial = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0.0 }, uColorBottom: { value: new THREE.Color(0x4a4a8a) }, uColorTop: { value: new THREE.Color(0x1a1a5a) }, uGlowIntensity: { value: 1.0 } },
+            vertexShader: `varying vec3 vWorldPosition; void main() { vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform float uTime; uniform vec3 uColorBottom; uniform vec3 uColorTop; uniform float uGlowIntensity; varying vec3 vWorldPosition; float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453); } void main() { float t = vWorldPosition.y / 500.0; vec3 color = mix(uColorBottom, uColorTop, t); float glow = exp(-abs(t - 0.1) * 10.0) * uGlowIntensity; float noise = 0.0; noise += random(vWorldPosition.xy + uTime); noise += random(vWorldPosition.xy + uTime + vec2(0.1, 0.0)); noise += random(vWorldPosition.xy + uTime + vec2(0.0, 0.1)); noise += random(vWorldPosition.xy + uTime + vec2(0.1, 0.1)); noise /= 4.0; noise *= 0.1; color += vec3(0.5, 0.2, 0.8) * glow + vec3(noise); gl_FragColor = vec4(color, 1.0); }`,
+            side: THREE.BackSide
+        });
+        skyMaterial.uniforms.uGlowIntensity.value = 1.5;
+        const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+        scene.add(sky);
+
+        const keyLightDLight001 = new THREE.DirectionalLight(0xffccaa, 1.2);
+        keyLightDLight001.position.set(50, 50, 50);
+        keyLightDLight001.castShadow = true;
+        keyLightDLight001.shadow.mapSize.width = 1024;
+        keyLightDLight001.shadow.mapSize.height = 1024;
+        scene.add(keyLightDLight001);
+
+        const keyLightDLight002 = new THREE.DirectionalLight(0xffccaa, 1.2);
+        keyLightDLight002.position.set(-50, 50, -50);
+        keyLightDLight002.castShadow = true;
+        keyLightDLight002.shadow.mapSize.width = 1024;
+        keyLightDLight002.shadow.mapSize.height = 1024;
+        scene.add(keyLightDLight002);
+
+        const textureLoader = new THREE.TextureLoader();
+        const groundTexture = textureLoader.load('assets/concrete.jpg', (texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(10, 10);
+            texture.generateMipmaps = true;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            texture.needsUpdate = true;
+            if (gridMaterial.uniforms && gridMaterial.uniforms.uTexture) {
+                gridMaterial.uniforms.uTexture.value = texture;
+                gridMaterial.needsUpdate = true;
+            }
+        });
+
+        const wallTexture = textureLoader.load('assets/wall_texture.jpg', (texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(20, 1);
+            texture.generateMipmaps = true;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            texture.needsUpdate = true;
+            if (gridMaterial.uniforms && gridMaterial.uniforms.uTexture) {
+                gridMaterial.uniforms.uTexture.value = texture;
+                gridMaterial.needsUpdate = true;
+            }
+        });
+        const gridMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTexture: { value: groundTexture },
+                uGridColor: { value: new THREE.Color(0xffffff) },
+                uScale: { value: 0.10 },
+                uThickness: { value: 0.03 },
+                uFrequency: { value: 20.0 }
+            },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform sampler2D uTexture; uniform vec3 uGridColor; uniform float uScale; uniform float uThickness; uniform float uFrequency; varying vec2 vUv; void main() { vec3 baseColor = texture2D(uTexture, vUv).rgb; vec2 grid = fract(vUv * uFrequency); vec2 lines = step(uThickness, grid); float pattern = min(lines.x, lines.y); vec3 color = mix(uGridColor, baseColor, pattern); gl_FragColor = vec4(color, 1.0); }`
+        });
+
+        const fallbackMaterial = new THREE.MeshStandardMaterial({ map: wallTexture });
+        const wallNSGeometry = new THREE.BoxGeometry(100, 10, 1);
+        const wallEWGeometry = new THREE.BoxGeometry(1, 10, 100);
+        const northWall = new THREE.Mesh(wallNSGeometry, fallbackMaterial); northWall.position.set(0, 2.5, 50); scene.add(northWall);
+        const southWall = new THREE.Mesh(wallNSGeometry, fallbackMaterial); southWall.position.set(0, 2.5, -50); scene.add(southWall);
+        const eastWall = new THREE.Mesh(wallEWGeometry, fallbackMaterial); eastWall.position.set(50, 2.5, 0); scene.add(eastWall);
+        const westWall = new THREE.Mesh(wallEWGeometry, fallbackMaterial); westWall.position.set(-50, 2.5, 0); scene.add(westWall);
+        northWall.receiveShadow = true; southWall.receiveShadow = true; eastWall.receiveShadow = true; westWall.receiveShadow = true;
+        northWall.castShadow = true; southWall.castShadow = true; eastWall.castShadow = true; westWall.castShadow = true;
+
+        const innerPlatform1Geometry = new THREE.BoxGeometry(100, 1, 100);
+        const innerPlatform3 = new THREE.Mesh(innerPlatform1Geometry, fallbackMaterial);
+        innerPlatform3.position.set(0, 0, 0);
+        scene.add(innerPlatform3);
+        const groundMaterial = new THREE.MeshStandardMaterial({ map: groundTexture });
+        innerPlatform3.material = groundMaterial;
+        innerPlatform3.receiveShadow = true;
+
+        const canvas = document.getElementById('canvas');
+        window.addEventListener('click', () => canvas.requestPointerLock());
+
+        let character, mixer, idleAction, runningAction, runningBackwardsAction, leftStrafeAction, rightStrafeAction, lookUpAction, lookDownAction;
+        let eventQueue;
+        let projectiles = [];
+        let controlsDisabled = false;
+        const keys = { w: false, a: false, s: false, d: false, space: false, ctrl: false };
+        let isOnPlatform = false;
+        let wasSpacePressed = false;
+        const sensitivity = 0.003;
+        let yaw = 0;
+        let pitch = 0.0;
+        const moveSpeed = 15;
+
+        async function main() {
+            await initPhysics();
+            eventQueue = new RAPIER.EventQueue(false); // Changed from true to false
+            const material = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                opacity: 0.0,        // Adjust this value between 0 (fully transparent) and 1 (fully opaque)
+                transparent: true    // Enables transparency
+            });
+            const geometry = new THREE.BoxGeometry(0.25, 0.25, 1);
+            character = new THREE.Mesh(geometry, material);
+            scene.add(character);
+            animate();
+        }
+
+        main();
+
+        function createProjectile() {
+            const playerPos = characterBody.translation();
+            const playerRot = characterBody.rotation();
+            const localOffset = new THREE.Vector3(0, 0.25, -1);
+            const worldOffset = localOffset.clone().applyQuaternion(
+                new THREE.Quaternion(playerRot.x, playerRot.y, playerRot.z, playerRot.w)
+            );
+            const startPos = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z).add(worldOffset);
+
+            const projectileDesc = RAPIER.RigidBodyDesc.dynamic()
+                .setTranslation(startPos.x, startPos.y, startPos.z)
+                .setAdditionalMass(0.1)
+                .setLinearDamping(0.0)
+                .setCcdEnabled(true);
+            const projectileBody = world.createRigidBody(projectileDesc);
+            projectileBody.userData = { type: 'projectile' };
+
+            const projectileColliderDesc = RAPIER.ColliderDesc.ball(0.2)
+                .setRestitution(0.0)
+                .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+            world.createCollider(projectileColliderDesc, projectileBody);
+
+            // Replace direction calculation
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); // Use camera's full rotation
+            const velocity = direction.multiplyScalar(200);
+            projectileBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
+
+            const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+            const material = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.userData.type = 'projectile';
+            mesh.userData.id = Date.now() + Math.random();
+            scene.add(mesh);
+
+            projectiles.push({
+                id: mesh.userData.id,
+                body: projectileBody,
+                mesh: mesh,
+                creationTime: Date.now()
+            });
+        }
+
+        function handleProjectileCollision(projectileBody) {
+            const projectile = projectiles.find(p => p.body === projectileBody);
+            if (!projectile) return;
+
+            scene.remove(projectile.mesh);
+            world.removeRigidBody(projectile.body);
+            projectiles = projectiles.filter(p => p !== projectile);
+
+            const collisionPoint = projectileBody.translation();
+            createExplosion(collisionPoint);
+        }
+
+        function update() {
+            if (!characterBody) return;
+
+            const cameraEuler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+            const cameraQuaternion = new THREE.Quaternion().setFromEuler(cameraEuler);
+            const offsetLocal = new THREE.Vector3(0, 1, 2);
+            const offsetWorld = offsetLocal.clone().applyQuaternion(cameraQuaternion);
+
+            const characterQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+            characterBody.setRotation(new RAPIER.Quaternion(characterQuaternion.x, characterQuaternion.y, characterQuaternion.z, characterQuaternion.w), true);
+
+            // Call updatePhysics to handle movement
+            const physicsState = updatePhysics(clock.getDelta(), keys, eventQueue);
+            const position = physicsState.position;
+            const rotation = physicsState.rotation;
+
+            character.position.set(position.x, position.y, position.z);
+            character.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+
+            camera.position.copy(character.position).add(offsetWorld);
+            camera.quaternion.copy(cameraQuaternion);
+            const moveForward = keys.w ? 1 : keys.s ? -1 : 0;
+            const moveRight = keys.d ? 1 : keys.a ? -1 : 0;
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(character.quaternion);
+            const right = forward.clone().cross(new THREE.Vector3(0, 1, 0));
+            const velocityVec = new THREE.Vector3();
+            if (moveForward !== 0 || moveRight !== 0) {
+                velocityVec.add(forward.multiplyScalar(moveForward));
+                velocityVec.add(right.multiplyScalar(moveRight));
+                velocityVec.normalize().multiplyScalar(moveSpeed);
+            }
+            const currentVel = characterBody.linvel();
+            characterBody.setLinvel({ x: velocityVec.x, y: currentVel.y, z: velocityVec.z }, true); // Uncomment this line
+
+
+
+            // Initialize collections for deferred actions
+            let projectilesToRemove = new Set();
+            let explosionsToCreate = [];
+
+            // Perform the physics step
+            world.step(eventQueue);
+
+            // Process collision events
+            eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+                const collider1 = world.getCollider(handle1);
+                const collider2 = world.getCollider(handle2);
+                const body1 = collider1.parent();
+                const body2 = collider2.parent();
+
+                // Handle character-platform collisions
+                if (body1 === characterBody && body2.userData.type === 'platform') {
+                    isOnPlatform = started;
+                } else if (body2 === characterBody && body1.userData.type === 'platform') {
+                    isOnPlatform = started;
+                }
+
+                // Collect projectiles to remove and explosion positions
+                if (body1.userData.type === 'projectile' && started) {
+                    const projectile = projectiles.find(p => p.body === body1);
+                    if (projectile) {
+                        projectilesToRemove.add(projectile);
+                        explosionsToCreate.push(body1.translation());
+                    }
+                } else if (body2.userData.type === 'projectile' && started) {
+                    const projectile = projectiles.find(p => p.body === body2);
+                    if (projectile) {
+                        projectilesToRemove.add(projectile);
+                        explosionsToCreate.push(body2.translation());
+                    }
+                }
+            });
+
+            // Perform deferred actions after physics step and event handling
+            projectilesToRemove.forEach(projectile => {
+                scene.remove(projectile.mesh);
+                world.removeRigidBody(projectile.body);
+                projectiles = projectiles.filter(p => p !== projectile);
+            });
+
+            explosionsToCreate.forEach(position => {
+                createExplosion(position);
+            });
+
+
+            if (keys.space && !wasSpacePressed && isOnPlatform) {
+                const jumpImpulse = { x: 0, y: 50, z: 0 };
+                characterBody.applyImpulse(jumpImpulse, true);
+            }
+            wasSpacePressed = keys.space;
+
+            projectiles.forEach(projectile => {
+                const pos = projectile.body.translation();
+                projectile.mesh.position.set(pos.x, pos.y, pos.z);
+            });
+
+            const now = Date.now();
+            projectiles = projectiles.filter(projectile => {
+                if (now - projectile.creationTime > 3000) {
+                    scene.remove(projectile.mesh);
+                    world.removeRigidBody(projectile.body);
+                    return false;
+                }
+                return true;
+            });
+
+        }   
+
+        const smokeTexture = textureLoader.load('assets/smoke_2.png');
+        const fireTexture = textureLoader.load('assets/fire1.png');
+
+        function createExplosion(position) {
+            generateSmokeAtPosition(position);
+        }
+
+        function createTrailSmoke(position) {
+            const particleCount = 5;
+            const particles = [];
+            for (let i = 0; i < particleCount; i++) {
+                const spriteMaterial = new THREE.SpriteMaterial({
+                    map: smokeTexture,
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.6,
+                    blending: THREE.NormalBlending,
+                    depthWrite: false,
+                    rotation: Math.random() * Math.PI * 2
+                });
+                const sprite = new THREE.Sprite(spriteMaterial);
+                sprite.position.set(position.x, position.y, position.z);
+                sprite.scale.set(1, 1, 1);
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.02,
+                    0.05 + Math.random() * 0.02,
+                    (Math.random() - 0.5) * 0.02
+                );
+                sprite.userData.velocity = velocity;
+                scene.add(sprite);
+                particles.push(sprite);
+            }
+            return particles;
+        }
+
+        function createSmoke(position) {
+            const particleCount = 40;
+            const particles = [];
+            for (let i = 0; i < particleCount; i++) {
+                const spriteMaterial = new THREE.SpriteMaterial({
+                    map: smokeTexture,
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.9,
+                    blending: THREE.NormalBlending,
+                    depthWrite: false,
+                    rotation: Math.random() * Math.PI * 2
+                });
+                const sprite = new THREE.Sprite(spriteMaterial);
+                sprite.position.set(position.x, position.y, position.z);
+                sprite.scale.set(3, 3, 1);
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const speed = 0.1;
+                const velocity = new THREE.Vector3(
+                    speed * Math.sin(phi) * Math.cos(theta) * 2,
+                    speed * Math.cos(phi) * 0.4,
+                    speed * Math.sin(phi) * Math.sin(theta) * 2
+                );
+                sprite.userData.velocity = velocity;
+                scene.add(sprite);
+                particles.push(sprite);
+            }
+            return particles;
+        }
+
+        function createFire(position) {
+            const particleCount = 40;
+            const particles = [];
+            for (let i = 0; i < particleCount; i++) {
+                const spriteMaterial = new THREE.SpriteMaterial({
+                    map: fireTexture,
+                    color: 0xff9c00,
+                    transparent: true,
+                    opacity: 0.6,
+                    blending: THREE.NormalBlending,
+                    depthWrite: false,
+                    rotation: Math.random() * Math.PI * 2
+                });
+                
+                const sprite = new THREE.Sprite(spriteMaterial);
+                sprite.position.set(position.x, position.y, position.z);
+                sprite.scale.set(3, 3, 1);
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const speed = 0.07;
+                const velocity = new THREE.Vector3(
+                    speed * Math.sin(phi) * Math.cos(theta),
+                    speed * Math.cos(phi) * 1.4,
+                    speed * Math.sin(phi) * Math.sin(theta)
+                );
+                sprite.userData.velocity = velocity;
+                scene.add(sprite);
+                particles.push(sprite);
+            }
+            return particles;
+        }
+
+        function animateSmoke(particles, duration) {
+            const startTime = Date.now();
+            const interval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const progress = elapsed / duration;
+                if (progress >= 1) {
+                    clearInterval(interval);
+                    particles.forEach(particle => scene.remove(particle));
+                    return;
+                }
+                const damping = 0.98;
+                particles.forEach(particle => {
+                    particle.userData.velocity.multiplyScalar(damping);
+                    particle.position.add(particle.userData.velocity);
+                });
+                const opacity = 0.6 * (1 - progress);
+                particles.forEach(particle => particle.material.opacity = opacity);
+            }, 16);
+        }
+
+        function generateSmokeAtPosition(position) {
+            const smokeParticles = createSmoke(position);
+            const fireParticles = createFire(position);
+            animateSmoke(smokeParticles, 2000);
+            animateSmoke(fireParticles, 1200);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            skyMaterial.uniforms.uTime.value = clock.getElapsedTime();
+
+            // if (mixer) mixer.update(delta);
+            scene.children.forEach(child => {
+                if (child.userData.velocity) {
+                    child.position.add(child.userData.velocity.clone().multiplyScalar(delta));
+                }
+            });
+
+            scene.children.forEach(child => {
+                if (child.userData.type === 'projectile') {
+                    if (!child.userData.lastSmokePosition) {
+                        child.userData.lastSmokePosition = child.position.clone();
+                    } else {
+                        const distance = child.position.distanceTo(child.userData.lastSmokePosition);
+                        if (distance > 2) {
+                            const smokeParticles = createTrailSmoke(child.position);
+                            animateSmoke(smokeParticles, 2000);
+                            child.userData.lastSmokePosition.copy(child.position);
+                        }
+                    }
+                }
+            });
+
+            if (character) {
+                update();
+                renderer.render(scene, camera); // Replace composer.render()
+            }
+        }
+
+        window.addEventListener('keydown', (event) => {
+            if (controlsDisabled) return;
+            if (event.key === 'w') keys.w = true;
+            if (event.key === 'a') keys.a = true;
+            if (event.key === 's') keys.s = true;
+            if (event.key === 'd') keys.d = true;
+            if (event.key === ' ') { event.preventDefault(); keys.space = true; }
+        });
+
+        window.addEventListener('keyup', (event) => {
+            if (controlsDisabled) return;
+            if (event.key === 'w') keys.w = false;
+            if (event.key === 'a') keys.a = false;
+            if (event.key === 's') keys.s = false;
+            if (event.key === 'd') keys.d = false;
+            if (event.key === ' ') keys.space = false;
+        });
+
+        window.addEventListener('mousemove', (event) => {
+            if (document.pointerLockElement === canvas && !controlsDisabled) {
+                yaw -= event.movementX * sensitivity;
+                pitch -= event.movementY * sensitivity;
+                pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            if (document.pointerLockElement === canvas && !controlsDisabled) {
+                createProjectile();
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            fxaaPass.uniforms['resolution'].value.set(1 / window.innerWidth, 1 / window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>
