@@ -7,6 +7,7 @@ let rapierLoaded = false;
 let ramps = [];
 let walls = [];
 let platforms = [];
+let boxPlatformBody; // New variable to store the box platform's rigid body
 
 export async function initPhysics() {
     if (!rapierLoaded) {
@@ -23,6 +24,9 @@ export async function initPhysics() {
     createWall({ x: -50, y: 2.5, z: 0 }, { x: 0.5, y: 5, z: 50 }, 0.3, 'wall');
 
     createPlatform({ x: 0, y: 0, z: 0 }, { x: 50, y: 1, z: 50 }, 0.3, 'platform');
+
+    // Store the box platform's rigid body
+    boxPlatformBody = createPlatform({ x: 0, y: 5, z: 10 }, { x: 2.5, y: 5, z: 2.5 }, 0.3, 'platform');
 
     const spawnPoints = [
         { x: 0, y: 10, z: 0 },
@@ -45,14 +49,14 @@ export async function initPhysics() {
         .setTranslation(selectedPos.x, selectedPos.y, selectedPos.z)
         .setRotation(rotation)
         .setAdditionalMass(1.0)
-        .setLinearDamping(0.5) // Reduced from 5.0 to 0.5 for less resistance
+        .setLinearDamping(0.5)
         .setAngularDamping(0.2);
     characterBody = world.createRigidBody(characterBodyDesc);
     characterBody.userData = { type: 'character' };
 
     let characterColliderDesc = RAPIER.ColliderDesc.cuboid(0.5, 1, 0.5)
         .setFriction(0.5)
-        .setRestitution(0.0); // No bouncing
+        .setRestitution(0.0);
     world.createCollider(characterColliderDesc, characterBody);
     world.step();
 }
@@ -69,7 +73,7 @@ function createWall(position, size, restitution = 0.3, type) {
         position: { x: position.x, y: position.y, z: position.z },
         sizes: { x: size.x * 2, y: size.y * 2, z: size.z * 2 },
     });
-    return collider;
+    return wallBody; // Return the rigid body
 }
 
 function createPlatform(position, size, restitution = 0.3, type) {
@@ -85,7 +89,7 @@ function createPlatform(position, size, restitution = 0.3, type) {
         position: { x: position.x, y: position.y, z: position.z },
         sizes: { x: size.x * 2, y: size.y * 2, z: size.z * 2 },
     });
-    return collider;
+    return platformBody; // Return the rigid body instead of the collider
 }
 
 let lastInputs = { w: false, a: false, s: false, d: false };
@@ -93,10 +97,10 @@ export function updatePhysics(delta, keys, eventQueue) {
     if (!rapierLoaded || !characterBody) return { position: { x: 0, y: 4, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 }, displaySpeed: 0 };
     lastInputs = { ...keys };
 
-    const maxSpeed = 15; // Reduced to 15 for better control at higher responsiveness
-    const turnSpeed = 2; // Increased from 1 to 2 for faster turning
-    const acceleration = 50; // Adjusted to 50 for snappier movement
-    const friction = 10; // Increased to 10 for quicker stopping
+    const maxSpeed = 15;
+    const turnSpeed = 2;
+    const acceleration = 50;
+    const friction = 10;
 
     const currentVel = characterBody.linvel();
     const quat = characterBody.rotation();
@@ -127,7 +131,6 @@ export function updatePhysics(delta, keys, eventQueue) {
     else if (keys.d) angularVelocity.y = -turnSpeed * (keys.w || keys.s ? 1.5 : 0.5);
     characterBody.setAngvel(angularVelocity, true);
 
-    // Remove additional fall impulse since gravity is stronger now
     world.step(eventQueue, { numSubsteps: 8 });
     const position = characterBody.translation();
     const rotation = characterBody.rotation();
@@ -144,4 +147,4 @@ export function updatePhysics(delta, keys, eventQueue) {
     };
 }
 
-export { world, characterBody };
+export { world, characterBody, boxPlatformBody }; // Export the box platform's rigid body
