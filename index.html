@@ -22,35 +22,14 @@
             border-radius: 4px;
             border: 2px solid #00ff15;
         }
-
-        /* New styles for overlay text */
-        .overlay-text {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-            color: white;
-            font-size: 48px;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
-            pointer-events: none; /* Prevents interference with clicks */
-        }
-
-        .headshot {
-            color: #ff4444; /* Red for HEADSHOT */
-        }
-
-        .weak-sauce {
-            color: #ffff44; /* Yellow for WEAK SAUCE */
-        }
     </style>
 </head>
 
 <body>
     <div id="canvas">
-        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 5px; height: 5px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;"></div>
+        <div
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 5px; height: 5px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;">
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
@@ -62,22 +41,18 @@
                 "three/EffectComposer": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/EffectComposer.js",
                 "three/RenderPass": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/RenderPass.js",
                 "three/ShaderPass": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/postprocessing/ShaderPass.js",
-                "three/FXAAShader": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/shaders/FXAAShader.js",
-                "three/GLTFLoader": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js"
+                "three/FXAAShader": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/shaders/FXAAShader.js"
             }
         }
     </script>
     <script type="module">
         import * as THREE from 'three';
-        import { GLTFLoader } from 'three/GLTFLoader';
         import { EffectComposer } from 'three/EffectComposer';
         import { RenderPass } from 'three/RenderPass';
         import { ShaderPass } from 'three/ShaderPass';
         import { FXAAShader } from 'three/FXAAShader';
-        import { initPhysics, updatePhysics, world, characterBody, boxPlatformBody } from './physics.js';
+        import { initPhysics, updatePhysics, world, characterBody } from './physics.js';
         import * as RAPIER from 'rapier';
-        let uziModel;
-
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer();
@@ -178,14 +153,6 @@
         innerPlatform3.material = groundMaterial;
         innerPlatform3.receiveShadow = true;
 
-        const boxGeometry = new THREE.BoxGeometry(5, 10, 5);
-        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
-        const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-        boxMesh.position.set(0, 5, 10);
-        boxMesh.castShadow = true;
-        boxMesh.receiveShadow = true;
-        scene.add(boxMesh);
-
         const canvas = document.getElementById('canvas');
         window.addEventListener('click', () => canvas.requestPointerLock());
 
@@ -201,56 +168,17 @@
         let pitch = 0.0;
         const moveSpeed = 15;
 
-        const gltfLoader = new GLTFLoader();
-        const additionalRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-
-        let isAnimating = false;
-        let animationStartTime = 0;
-        const animationDuration = 500;
-
-        // Function to display overlay text
-        function displayOverlayText(text, className) {
-            const overlay = document.createElement('div');
-            overlay.textContent = text;
-            overlay.classList.add('overlay-text', className);
-            document.body.appendChild(overlay);
-
-            setTimeout(() => {
-                document.body.removeChild(overlay);
-            }, 500); // Remove after 500ms
-        }
-
         async function main() {
             await initPhysics();
-            eventQueue = new RAPIER.EventQueue(false);
-            const material = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.0, transparent: true });
+            eventQueue = new RAPIER.EventQueue(false); // Changed from true to false
+            const material = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                opacity: 0.0,        // Adjust this value between 0 (fully transparent) and 1 (fully opaque)
+                transparent: true    // Enables transparency
+            });
             const geometry = new THREE.BoxGeometry(0.25, 0.25, 1);
             character = new THREE.Mesh(geometry, material);
             scene.add(character);
-
-            gltfLoader.load(
-                '/assets/uzi.glb',
-                (gltf) => {
-                    uziModel = gltf.scene;
-                    uziModel.scale.set(1, 1, 1);
-                    scene.add(uziModel);
-                    uziModel.traverse((child) => {
-                        if (child.isMesh) {
-                            const material = child.material;
-                            if (material.isMeshStandardMaterial) {
-                                material.emissive = new THREE.Color(0.08, 0.08, 0.08);
-                                material.emissiveIntensity = 1.5;
-                            } else if (material.isMeshBasicMaterial) {
-                                material.color.multiplyScalar(1.5);
-                            }
-                            material.needsUpdate = true;
-                        }
-                    });
-                    console.log('uziModel loaded. Scene children:', scene.children);
-                },
-                undefined,
-                (error) => console.error('Error loading uzi model:', error)
-            );
             animate();
         }
 
@@ -278,7 +206,8 @@
                 .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
             world.createCollider(projectileColliderDesc, projectileBody);
 
-            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            // Replace direction calculation
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); // Use camera's full rotation
             const velocity = direction.multiplyScalar(200);
             projectileBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
 
@@ -321,6 +250,7 @@
             const characterQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
             characterBody.setRotation(new RAPIER.Quaternion(characterQuaternion.x, characterQuaternion.y, characterQuaternion.z, characterQuaternion.w), true);
 
+            // Call updatePhysics to handle movement
             const physicsState = updatePhysics(clock.getDelta(), keys, eventQueue);
             const position = physicsState.position;
             const rotation = physicsState.rotation;
@@ -330,28 +260,6 @@
 
             camera.position.copy(character.position).add(offsetWorld);
             camera.quaternion.copy(cameraQuaternion);
-
-            if (uziModel) {
-                const uziOffset = new THREE.Vector3(0.6, -0.5, -1);
-                const worldOffset = uziOffset.clone().applyQuaternion(camera.quaternion);
-                uziModel.position.copy(camera.position).add(worldOffset);
-
-                uziModel.quaternion.copy(camera.quaternion);
-                uziModel.quaternion.multiply(additionalRotation);
-
-                if (isAnimating) {
-                    const elapsed = clock.getElapsedTime() * 1000 - animationStartTime;
-                    const progress = Math.min(elapsed / animationDuration, 1);
-                    const angle = progress * Math.PI * 2;
-                    const xRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
-                    uziModel.quaternion.multiply(xRotation);
-
-                    if (progress >= 1) {
-                        isAnimating = false;
-                    }
-                }
-            }
-
             const moveForward = keys.w ? 1 : keys.s ? -1 : 0;
             const moveRight = keys.d ? 1 : keys.a ? -1 : 0;
             const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(character.quaternion);
@@ -363,55 +271,48 @@
                 velocityVec.normalize().multiplyScalar(moveSpeed);
             }
             const currentVel = characterBody.linvel();
-            characterBody.setLinvel({ x: velocityVec.x, y: currentVel.y, z: velocityVec.z }, true);
+            characterBody.setLinvel({ x: velocityVec.x, y: currentVel.y, z: velocityVec.z }, true); // Uncomment this line
 
+
+
+            // Initialize collections for deferred actions
             let projectilesToRemove = new Set();
             let explosionsToCreate = [];
 
+            // Perform the physics step
             world.step(eventQueue);
 
+            // Process collision events
             eventQueue.drainCollisionEvents((handle1, handle2, started) => {
                 const collider1 = world.getCollider(handle1);
                 const collider2 = world.getCollider(handle2);
                 const body1 = collider1.parent();
                 const body2 = collider2.parent();
 
+                // Handle character-platform collisions
                 if (body1 === characterBody && body2.userData.type === 'platform') {
                     isOnPlatform = started;
                 } else if (body2 === characterBody && body1.userData.type === 'platform') {
                     isOnPlatform = started;
                 }
 
-                if (started) {
-                    let projectileBody, otherBody;
-                    if (body1.userData.type === 'projectile') {
-                        projectileBody = body1;
-                        otherBody = body2;
-                    } else if (body2.userData.type === 'projectile') {
-                        projectileBody = body2;
-                        otherBody = body1;
+                // Collect projectiles to remove and explosion positions
+                if (body1.userData.type === 'projectile' && started) {
+                    const projectile = projectiles.find(p => p.body === body1);
+                    if (projectile) {
+                        projectilesToRemove.add(projectile);
+                        explosionsToCreate.push(body1.translation());
                     }
-
-                    if (projectileBody) {
-                        const projectile = projectiles.find(p => p.body === projectileBody);
-                        if (projectile) {
-                            projectilesToRemove.add(projectile);
-                            const collisionPoint = projectileBody.translation();
-                            explosionsToCreate.push(collisionPoint);
-
-                            // Check if the collision is with the specific box platform
-                            if (otherBody === boxPlatformBody) {
-                                if (collisionPoint.y >= 5) {
-                                    displayOverlayText('HEADSHOT', 'headshot');
-                                } else if (collisionPoint.y < 5) {
-                                    displayOverlayText('WEAK SAUCE', 'weak-sauce');
-                                }
-                            }
-                        }
+                } else if (body2.userData.type === 'projectile' && started) {
+                    const projectile = projectiles.find(p => p.body === body2);
+                    if (projectile) {
+                        projectilesToRemove.add(projectile);
+                        explosionsToCreate.push(body2.translation());
                     }
                 }
             });
 
+            // Perform deferred actions after physics step and event handling
             projectilesToRemove.forEach(projectile => {
                 scene.remove(projectile.mesh);
                 world.removeRigidBody(projectile.body);
@@ -421,6 +322,7 @@
             explosionsToCreate.forEach(position => {
                 createExplosion(position);
             });
+
 
             if (keys.space && !wasSpacePressed && isOnPlatform) {
                 const jumpImpulse = { x: 0, y: 50, z: 0 };
@@ -442,7 +344,8 @@
                 }
                 return true;
             });
-        }
+
+        }   
 
         const smokeTexture = textureLoader.load('assets/smoke_2.png');
         const fireTexture = textureLoader.load('assets/fire1.png');
@@ -523,6 +426,7 @@
                     depthWrite: false,
                     rotation: Math.random() * Math.PI * 2
                 });
+                
                 const sprite = new THREE.Sprite(spriteMaterial);
                 sprite.position.set(position.x, position.y, position.z);
                 sprite.scale.set(3, 3, 1);
@@ -573,6 +477,7 @@
             const delta = clock.getDelta();
             skyMaterial.uniforms.uTime.value = clock.getElapsedTime();
 
+            // if (mixer) mixer.update(delta);
             scene.children.forEach(child => {
                 if (child.userData.velocity) {
                     child.position.add(child.userData.velocity.clone().multiplyScalar(delta));
@@ -596,19 +501,9 @@
 
             if (character) {
                 update();
-                renderer.render(scene, camera);
+                renderer.render(scene, camera); // Replace composer.render()
             }
         }
-
-        canvas.addEventListener('click', () => {
-            if (document.pointerLockElement === canvas && !controlsDisabled) {
-                createProjectile();
-                if (uziModel && !isAnimating) {
-                    isAnimating = true;
-                    animationStartTime = clock.getElapsedTime() * 1000;
-                }
-            }
-        });
 
         window.addEventListener('keydown', (event) => {
             if (controlsDisabled) return;
@@ -633,6 +528,12 @@
                 yaw -= event.movementX * sensitivity;
                 pitch -= event.movementY * sensitivity;
                 pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            if (document.pointerLockElement === canvas && !controlsDisabled) {
+                createProjectile();
             }
         });
 
